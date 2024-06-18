@@ -1,0 +1,356 @@
+---
+title: "STA 302 Project"
+author: "Wenjun He, Krit Kasikpan"
+date: "2024-06-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, message=FALSE}
+# R package
+install.packages("glmnet")
+library(glmnet)
+library(car)
+library(MASS)
+```
+
+```{r, echo=FALSE, message=FALSE}
+# Put both documents at the same directory
+Data = read.csv("./Data.csv",header=T)
+```
+
+This is the dataset:
+```{r}
+Data
+```
+
+The measurements are:
+**Life ** Life expectancy in years
+**Calorie** Average daily calorie intake in kilocalorie
+**Protein** - Average daily protein intake in grams
+**Fat** - Average daily fat intake in grams
+**GDP** - GDP per capital in US dollara
+**School** - Average years of schooling in years
+
+## Split the data using the following code below
+
+```{r}
+set.seed(7)  # For reproducibility
+sample_index <- sample(seq_len(nrow(Data)), size = 0.6 * nrow(Data))
+train_data <- Data[sample_index, ]
+test_data <- Data[-sample_index, ]
+```
+
+## Statistics for train and test data
+
+```{r}
+summary(train_data)
+summary(test_data)
+```
+
+
+## Exploratory analysis
+
+Let's first model the original data with the full model
+```{r}
+full_model =  lm(Life ~ Calorie+Protein+Fat+GDP+School, train_data)
+summary(full_model)
+```
+RSE is low, but Adjusted R squared is low, maybe we can find a better model that have more explained variance.
+
+
+Check linearity
+```{r}
+pairs(Life ~ Calorie+Protein+Fat+GDP+School, train_data)
+```
+```{r}
+cor(train_data[c("Calorie","Protein","Fat", "GDP", "School")])
+```
+
+Looks like some of them (especially GDP and School) are not linear, we apply power transform
+
+```{r}
+summary(powerTransform(cbind(train_data[,1:6])))
+```
+The results shows that we need to square the Life, and log the GDP. Note that for Life, the pairwise plot shows mostly linear relationship with other variable, only nonlinear relationship that is caused by GDP, which we know have high possibility that needs to be transformed.
+
+Let's try both possibilities, let's look at 
+```{r}
+train_data$SqLife = (train_data$Life)^2
+train_data$logGDP = log(train_data$GDP)
+train_data$SqFat = sqrt(train_data$Fat)
+```
+
+Now let's check linearity again
+```{r}
+pairs(SqLife ~ Calorie+Protein+SqFat+logGDP+School, train_data)
+```
+Seems relationships are all linear or random, more over condition 2 satisfied.
+
+Now, we create the full model under the transformed variables.
+```{r}
+full_model1 = lm(SqLife ~ Calorie+Protein+SqFat+logGDP+School, train_data)
+summary(full_model1)
+```
+Adjusted R^2 improves a lot. However, RSE increases more than 100 times. This may indicate that such transformation may not be good. 
+
+AIC, BIC tells the same result.
+```{r}
+AIC(full_model)
+BIC(full_model)
+AIC(full_model1)
+BIC(full_model1)
+```
+
+Let's now try to see what if we don't transform Life. Let's first check the linearity
+```{r}
+pairs(Life ~ Calorie+Protein+SqFat+logGDP+School, train_data)
+```
+Seems relationships are all linear or random. More over condition 2 satisfied.
+
+```{r}
+full_model2 = lm(Life ~ Calorie+Protein+SqFat+logGDP+School, train_data)
+summary(full_model2)
+```
+
+Adjusted R^2 improves a lot. More importantly, RSE didn't increases. 
+
+AIC, BIC tells the same result, full_model2 is more suitable.
+```{r}
+AIC(full_model)
+BIC(full_model)
+AIC(full_model2)
+BIC(full_model2)
+```
+
+Hence, it is really clear that we do not need to transform the response variable.
+Remove SqLife
+```{r}
+train_data <- train_data[, -which(names(train_data) == "SqLife")]
+```
+
+Let's now check the conditions
+```{r}
+plot(predict(full_model2), train_data$Life)
+abline(lm(train_data$Life~predict(full_model2)))
+```
+Condition 1 is satisfied.
+
+Check the four assumptions
+```{r}
+plot(full_model2)
+```
+All four assumptions are met
+
+## Model Selection
+
+Recall our full model is
+```{r}
+summary(full_model2)
+```
+
+Let's also check the VIF
+```{r}
+vif(full_model2)
+```
+
+The p-value for calorie is the highest amongst others, with 0.967. This shows the calorie is an insignificant factor. Its vif is also very close to 5, showing some form of multicolinearity. Hence, we can probably remove it.
+```{r}
+reduced_model1 = lm(Life ~ Protein+SqFat+logGDP+School, train_data)
+```
+
+Again, let's check all model assumptions follows
+```{r}
+plot(predict(reduced_model1), train_data$Life)
+abline(lm(train_data$Life~predict(reduced_model1)))
+```
+Condition 1 satisfies.
+
+No need to check condition 2 as the pairwise plot is always the same.
+
+```{r}
+plot(reduced_model1)
+```
+Four assumptions satisfies. Hence, we can now compare the new model with the old one
+
+```{r}
+summary(reduced_model1)
+```
+Compare to the full_model2, the reduced_model1 has slightly lower RSE, and slightly higher adjusted R^2.
+
+Let's also check the AIC, BIC and the partial F-test
+```{r}
+AIC(full_model2)
+BIC(full_model2)
+AIC(reduced_model1)
+BIC(reduced_model1)
+anova(reduced_model1, full_model2)
+```
+It seems that all parameters (AIC, BIC, RSE, Adjusted R^2, and F-test) shows that reduced_model is a preferred model. Hence, we should use the reduced_model1.
+
+Let's now see if we can further reduce the model. First check the VIF for the reduced_model1
+```{r}
+vif(reduced_model1)
+```
+
+All parameters show some extent of multicollinearity but it is not that problematic. Let's also look at the summary of the model as well.
+```{r}
+summary(reduced_model1)
+```
+
+It seems that both Protein, and School are insignificant as they have high P-values. However, Protein has the highest VIF among the three, having the highest multicollinearity. So let's first remove it,
+
+```{r}
+reduced_model2 = lm(Life ~ SqFat+logGDP+School, train_data)
+```
+
+Again, let's check all model assumptions follows
+```{r}
+plot(predict(reduced_model2), train_data$Life)
+abline(lm(train_data$Life~predict(reduced_model2)))
+```
+Condition 1 satisfies. And no need to check condition 2.
+
+```{r}
+plot(reduced_model2)
+```
+Four assumptions satisfies. Hence, we can now compare the new model with the old one
+
+Let's look at the summary
+```{r}
+summary(reduced_model2)
+```
+RSE and adjusted R^2 improves.
+
+Let's see the AIC, BIC as well as the partial F-test.
+```{r}
+AIC(reduced_model1)
+BIC(reduced_model1)
+AIC(reduced_model2)
+BIC(reduced_model2)
+anova(reduced_model2, reduced_model1)
+```
+All of them shows that reduced_model2 is a preferred model. Hence, we accept reduced_model2.
+
+Let's check the summary and the VIF again
+```{r}
+summary(reduced_model2)
+vif(reduced_model2)
+```
+
+Again, although it seems that VIF for all of the predictors are within the acceptable range, it seems that we can remove School base on the p-value. Let's get the model
+```{r}
+reduced_model3 = lm(Life ~ SqFat+logGDP, train_data)
+```
+
+Check all model assumptions follows
+```{r}
+plot(predict(reduced_model3), train_data$Life)
+abline(lm(train_data$Life~predict(reduced_model3)))
+```
+Condition 1 satisfies. And no need to check condition 2.
+
+```{r}
+plot(reduced_model3)
+```
+Four assumptions satisfies. Hence, we can now compare the new model with the old one
+
+Let's look at the summary
+```{r}
+summary(reduced_model3)
+```
+There is a slightly better RSE and adjusted R^2.
+
+Let's look at AIC, BIC and anova
+```{r}
+AIC(reduced_model2)
+BIC(reduced_model2)
+AIC(reduced_model3)
+BIC(reduced_model3)
+anova(reduced_model3, reduced_model2)
+```
+All tests shows that reduced_model3 is preferred. Let's keep it.
+
+Let's check the summary and the VIF again
+```{r}
+summary(reduced_model3)
+vif(reduced_model3)
+```
+
+Finally, despite all VIF and P-value is in the acceptable range. SqFat is still not as significant as logGDP, just for checking, let's see if we remove SqFat would result a more suitable model. This new model would be a simple linear regression
+```{r}
+reduced_model4 = lm(Life ~ logGDP, train_data)
+```
+
+Again, let's check all model assumptions follows
+```{r}
+plot(predict(reduced_model4), train_data$Life)
+abline(lm(train_data$Life~predict(reduced_model4)))
+```
+Condition 1 satisfies. And no need to check condition 2.
+
+```{r}
+plot(reduced_model4)
+```
+Four assumptions satisfies. Hence, we can now compare the new model with the old one
+
+```{r}
+summary(reduced_model4)
+```
+It seems that RSE and adjusted R^2 get worsen.
+
+Let's look at AIC, BIC and anova
+```{r}
+AIC(reduced_model3)
+BIC(reduced_model3)
+AIC(reduced_model4)
+BIC(reduced_model4)
+anova(reduced_model4, reduced_model3)
+```
+All of AIC, BIC and partial F-test show that we cannot reject reduced_model3. Since the new model generated a greater residuals than the old one. We conclude that we accept reduced_model3.
+
+Finally, let's check our reduced_model3 again
+```{r}
+summary(reduced_model3)
+vif(reduced_model3)
+plot(reduced_model3)
+```
+The summary shows that the predictors are all significant and the vif shows that both of them contain little multicollinearity. Although there are some outliers but they are not highly influential. Hence, there is no reasons to eliminate them as these outliers won't affect the model significantly. We can conclude our final model is reduced_model3.
+
+## Model Validation
+
+Finally, let's validate our model by running the same thing in the test model. Again, we first transform the data
+```{r}
+test_data$logGDP = log(test_data$GDP)
+test_data$SqFat = sqrt(test_data$Fat)
+```
+
+Let's first check all the conditions
+```{r}
+pairs(Life ~ Calorie+Protein+SqFat+logGDP+School, test_data)
+```
+The relationship seems linear, hence linearity is satisfied. Moreover, condition 2 is also satisfied.
+
+For others, let's first create the model
+```{r}
+test_model = lm(Life ~ SqFat+logGDP, test_data)
+```
+
+Condition 1 is again satisfied
+```{r}
+plot(predict(test_model), test_data$Life)
+abline(lm(test_data$Life~predict(test_model)))
+```
+
+```{r}
+plot(test_model)
+```
+Four assumptions are satisfied. Homoscedasticity is slightly off but overall it is quite good. Similarly, there are some outliers but not highly influential, we can leave it as it is and proceed checking the model.
+
+Finally, let's check the model
+```{r}
+summary(test_model)
+```
+The two models have roughly similar RSE and adjusted R^2. Both shows that logGDP is significant in affecting Life expectancy. The significance for other parameters are also similar. Moreover, most estimates such as SqFat and logGDP are similar within the range of their standard error. Hence, it is suffice for us to conclude that we successfully validated our model.
