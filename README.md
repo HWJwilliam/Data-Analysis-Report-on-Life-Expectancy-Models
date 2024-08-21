@@ -11,7 +11,7 @@ as well as wider socioeconomic levels (GDP per capita, average years of schoolin
 
 🧐 The analysis is done in R code, a detailed report is also written.
 
-### 🤓 Topics Covered
+### 🤓 Techniques Used
 
 * Regression Assumptions
 * Backward Stepwise Regression (Partial F-test, P-value, adjusted R2, RSE, VIF, AIC, BIC)
